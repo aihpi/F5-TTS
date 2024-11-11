@@ -392,12 +392,13 @@ def infer_batch_process(
         audio = torch.mean(audio, dim=0, keepdim=True)
 
     rms = torch.sqrt(torch.mean(torch.square(audio)))
+    audio = audio.to(device)
     if rms < target_rms:
         audio = audio * target_rms / rms
     if sr != target_sample_rate:
         resampler = torchaudio.transforms.Resample(sr, target_sample_rate)
+        resampler = resampler.to(device)
         audio = resampler(audio)
-    audio = audio.to(device)
 
     generated_waves = []
     spectrograms = []
