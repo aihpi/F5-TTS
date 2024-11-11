@@ -2,7 +2,7 @@ import requests
 
 def main():
     # Server URL
-    url = 'http://gx12.matthias.herzog.vpn.hpi-sci.de:8000/generate'
+    url = 'http://gx12.matthias.herzog.vpn.hpi-sci.de:8005/generate'
 
     # Paths to your files
     ref_audio_path = '/path/to/ref_voice.wav'  # Replace with your reference audio file path
