@@ -1,7 +1,10 @@
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
 import torch
 import torchaudio
-from infer.utils_infer import infer_batch_process, preprocess_ref_audio_text, load_vocoder, load_model
-from model.backbones.dit import DiT
+from f5_tts.infer.utils_infer import infer_batch_process, preprocess_ref_audio_text, load_vocoder, load_model
+from f5_tts.model.backbones.dit import DiT
 
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.responses import StreamingResponse
@@ -10,8 +13,6 @@ from cached_path import cached_path
 import io
 import os
 import tempfile
-
-app = FastAPI()
 
 class TTSProcessor:
     def __init__(self, ckpt_file, vocab_file, device=None, dtype=torch.float32):
@@ -123,16 +124,31 @@ class TTSProcessor:
             # Clean up the temporary file
             os.remove(temp_audio_file_path)
 
+# fastapi
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator:
+    # Startup: Load the model
+    app.state.processor = TTSProcessor(
+        ckpt_file=str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors")),
+        vocab_file="",
+        dtype=torch.float32,
+    )
+    yield
+    # Cleanup (if needed)
+    app.state.processor = None
+
+app = FastAPI(lifespan=lifespan)
+
 @app.post("/generate")
 async def generate(
     ref_audio: UploadFile = File(...),
     ref_text: str = Form(""),
     text: str = Form(...)
-):
+) -> StreamingResponse:
     ref_audio_bytes = await ref_audio.read()
 
     # Generate the audio
-    audio_waveform, sample_rate = processor.generate_audio(ref_audio_bytes, ref_text, text)
+    audio_waveform, sample_rate = app.state.processor.generate_audio(ref_audio_bytes, ref_text, text)
 
     # Convert the generated waveform to bytes
     audio_bytes = io.BytesIO()
@@ -143,16 +159,4 @@ async def generate(
 
 if __name__ == "__main__":
     import uvicorn
-
-    # Initialize the processor
-    # ckpt_file = str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base_bigvgan/model_1250000.pt"))
-    ckpt_file = str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors"))
-    vocab_file = ""
-
-    processor = TTSProcessor(
-        ckpt_file=ckpt_file,
-        vocab_file=vocab_file,
-        dtype=torch.float32,
-    )
-
     uvicorn.run(app, host="0.0.0.0", port=8000)
