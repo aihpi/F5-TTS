@@ -15,7 +15,7 @@ RUN set -x \
 
 WORKDIR /workspace
 
-RUN git clone https://github.com/SWivid/F5-TTS.git \
+RUN git clone https://github.com/aihpi/F5-TTS.git \
     && cd F5-TTS \
     && pip install -e .[eval]
 
