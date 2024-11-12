@@ -1,11 +1,27 @@
-version: '3.8'
-
 services:
-  f5tts_api:
+  f5tts_api_de:
     build: .
     command: python -m uvicorn f5_tts.api_server:app --host 0.0.0.0 --port 8000
     ports:
-      - "8000:8000"
+      - "8004:8000"
+    environment:
+      - MODEL_FILEPATH="/var/tmp/model_12600.pt"
+    volumes:
+      - /raid/shared/models/F5TTS/model_12600.pt:/var/tmp/model_12600.pt:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    restart: unless-stopped
+
+  f5tts_api_en:
+    build: .
+    command: python -m uvicorn f5_tts.api_server:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8005:8000"
     deploy:
       resources:
         reservations:
