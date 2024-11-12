@@ -39,6 +39,7 @@ class Trainer:
         duration_predictor: torch.nn.Module | None = None,
         logger: str | None = "wandb",  # "wandb" | "tensorboard" | None
         wandb_project="test_e2-tts",
+        wandb_entity="test_project",
         wandb_run_name="test_run",
         wandb_resume_id: str = None,
         log_samples: bool = False,
@@ -65,9 +66,22 @@ class Trainer:
         self.logger = logger
         if self.logger == "wandb":
             if exists(wandb_resume_id):
-                init_kwargs = {"wandb": {"resume": "allow", "name": wandb_run_name, "id": wandb_resume_id}}
+                init_kwargs = {
+                    "wandb": {
+                        "resume": "allow",
+                        "name": wandb_run_name,
+                        "id": wandb_resume_id,
+                        "entity": wandb_entity,
+                    }
+                }
             else:
-                init_kwargs = {"wandb": {"resume": "allow", "name": wandb_run_name}}
+                init_kwargs = {
+                    "wandb": {
+                        "resume": "allow",
+                        "name": wandb_run_name,
+                        "entity": wandb_entity,
+                    }
+                }
 
             self.accelerator.init_trackers(
                 project_name=wandb_project,
@@ -331,7 +345,7 @@ class Trainer:
                         with torch.inference_mode():
                             generated, _ = self.accelerator.unwrap_model(self.model).sample(
                                 cond=mel_spec[0][:ref_audio_len].unsqueeze(0),
-                                text=[text_inputs[0] + " " + text_inputs[0]],
+                                text=[text_inputs[0] + [" "] + text_inputs[0]],
                                 duration=ref_audio_len * 2,
                                 steps=nfe_step,
                                 cfg_strength=cfg_strength,

@@ -17,7 +17,7 @@ mel_spec_type = "vocos"  # 'vocos' or 'bigvgan'
 
 tokenizer = "pinyin"  # 'pinyin', 'char', or 'custom'
 tokenizer_path = None  # if tokenizer = 'custom', define the path to the tokenizer you want to use (should be vocab.txt)
-dataset_name = "Emilia_DE_pinyin"
+dataset_name = "CV_de_Emilia_DE"
 
 # -------------------------- Training Settings -------------------------- #
 
@@ -32,9 +32,9 @@ grad_accumulation_steps = 1  # note: updates = steps / grad_accumulation_steps
 max_grad_norm = 1.0
 
 epochs = 11  # use linear decay, thus epochs control the slope
-num_warmup_updates = 360  # warmup steps
-save_per_updates = 200  # save checkpoint per steps
-last_per_steps = 200  # save last checkpoint per steps
+num_warmup_updates = 5000  # warmup steps
+save_per_updates = 1000  # save checkpoint per steps
+last_per_steps = 1000  # save last checkpoint per steps
 
 # model params
 if exp_name == "F5TTS_Base":
@@ -85,6 +85,7 @@ def main():
         grad_accumulation_steps=grad_accumulation_steps,
         max_grad_norm=max_grad_norm,
         wandb_project="CFM-TTS",
+        wandb_entity="hpi-audio-demonstrator",
         wandb_run_name=exp_name,
         wandb_resume_id=wandb_resume_id,
         last_per_steps=last_per_steps,
