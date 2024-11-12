@@ -127,9 +127,12 @@ class TTSProcessor:
 # fastapi
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
-    # Startup: Load the model
+    # Fetch ckpt_file from an environment variable or use a default path
+    ckpt_file = os.getenv("MODEL_FILEPATH", str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors")))
+
+    # Initialize the TTSProcessor with the provided or default checkpoint file
     app.state.processor = TTSProcessor(
-        ckpt_file=str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors")),
+        ckpt_file=ckpt_file,
         vocab_file="",
         dtype=torch.float32,
     )
