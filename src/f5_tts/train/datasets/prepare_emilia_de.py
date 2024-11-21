@@ -120,13 +120,18 @@ emilia_en_filters = ["ا", "い", "て"]
 def deal_with_emilia_audio_dir(audio_dir):
     sub_result, durations = [], []
     vocab_set = set()
-    bad_case_de, bad_case_en = 0, 0
+    bad_case_de, bad_case_en, bad_case_duration = 0, 0, 0
 
     glob_filter = os.path.join(audio_dir, "*.json")
     for json_file_path in glob.glob(glob_filter):
         with open(json_file_path, "r") as json_file:
             obj = json.load(json_file)
         text = obj["text"]
+        duration = obj["duration"]
+
+        if duration < 0.3 or duration > 30:
+            bad_case_duration += 1
+            continue
         if obj["language"] == "de":
             if (
                 obj["wav"].split("/")[1] in emilia_out_de
@@ -145,18 +150,19 @@ def deal_with_emilia_audio_dir(audio_dir):
                 continue
         if tokenizer == "pinyin":
             text = convert_char_to_pinyin([text], polyphone=polyphone)[0]
-        duration = obj["duration"]
 
         audio_path = str(json_file_path).replace('.json', '.mp3')
         sub_result.append({"audio_path": audio_path, "text": text, "duration": duration})
         durations.append(duration)
         vocab_set.update(list(text))
-    return sub_result, durations, vocab_set, bad_case_de, bad_case_en
+    return sub_result, durations, vocab_set, bad_case_de, bad_case_en, bad_case_duration
 
 
 def deal_with_cv_obj(obj, duration):
     text = obj["text"]
 
+    if duration < 0.3 or duration > 30:
+        return [], [], set(), 0, 0, 1
     if obj["language"] == "de":
         if (
             obj["wav"] in cv_out_de
@@ -164,7 +170,7 @@ def deal_with_cv_obj(obj, duration):
             or repetition_found(text, length=4)
         ):
             # sub_result, durations, vocab_set, bad_case_de, bad_case_en
-            return [], [], set(), 0, 1
+            return [], [], set(), 0, 1, 0
     if obj["language"] == "en":
         if (
             obj["wav"] in cv_out_en
@@ -172,7 +178,7 @@ def deal_with_cv_obj(obj, duration):
             or repetition_found(text, length=4)
         ):
             # sub_result, durations, vocab_set, bad_case_de, bad_case_en
-            return [], [], set(), 1, 0
+            return [], [], set(), 1, 0, 0
     if tokenizer == "pinyin":
         text = convert_char_to_pinyin([text], polyphone=polyphone)[0]
 
@@ -183,7 +189,7 @@ def deal_with_cv_obj(obj, duration):
     durations = [duration]
     vocab_set = set(list(text))
 
-    return sub_result, durations, vocab_set, 0, 0
+    return sub_result, durations, vocab_set, 0, 0, 0
 
 
 def main():
@@ -193,6 +199,7 @@ def main():
     text_vocab_set = set()
     total_bad_case_de = 0
     total_bad_case_en = 0
+    total_bad_case_duration = 0
 
     # process raw data
     executor = ProcessPoolExecutor(max_workers=max_workers)
@@ -206,12 +213,13 @@ def main():
         ]
     
     for futures in tqdm(futures, total=len(futures)):
-        sub_result, durations, vocab_set, bad_case_de, bad_case_en = futures.result()
+        sub_result, durations, vocab_set, bad_case_de, bad_case_en, bad_case_duration = futures.result()
         result.extend(sub_result)
         duration_list.extend(durations)
         text_vocab_set.update(vocab_set)
         total_bad_case_de += bad_case_de
         total_bad_case_en += bad_case_en
+        total_bad_case_duration += bad_case_duration
 
     executor.shutdown()
 
@@ -259,12 +267,13 @@ def main():
                         print()
                         print(split_name)
                         continue
-                    sub_result, durations, vocab_set, bad_case_de, bad_case_en = deal_with_cv_obj(obj, duration)
+                    sub_result, durations, vocab_set, bad_case_de, bad_case_en, bad_case_duration = deal_with_cv_obj(obj, duration)
                     result[split_name].extend(sub_result)
                     duration_list.extend(durations)
                     text_vocab_set.update(vocab_set)
                     total_bad_case_de += bad_case_de
                     total_bad_case_en += bad_case_en
+                    total_bad_case_duration += bad_case_duration
 
 
     cv_splits = result
