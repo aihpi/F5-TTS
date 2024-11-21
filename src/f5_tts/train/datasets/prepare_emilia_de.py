@@ -11,6 +11,8 @@ import sys
 import pandas as pd
 from numpy.compat import os_PathLike
 
+from sklearn.model_selection import train_test_split
+
 sys.path.append(os.getcwd())
 
 import json
@@ -29,7 +31,7 @@ from f5_tts.model.utils import (
 cv_out_de = {}
 cv_de_filters =  [
     '་', 'Ə', 'Ḫ', 'ů', '`', 'Ș', 'Œ', 'Ī', 'ġ', 'ſ', '‚', '‟', '‹', 'Ř', 'ŏ', '̆', 'Ț', 'ན', 'Ő', 'ḫ', 'ẞ', '̥', 'ṟ', '›',
-    'ď', 'Ħ', 'Ѹ', 'Ô', '„'
+    'ď', 'Ħ', 'Ѹ', 'Ô', '„',
 ]
 cv_out_en = {}
 cv_en_filters = []
@@ -118,8 +120,7 @@ emilia_en_filters = ["ا", "い", "て"]
 def deal_with_emilia_audio_dir(audio_dir):
     sub_result, durations = [], []
     vocab_set = set()
-    bad_case_de = 0
-    bad_case_en = 0
+    bad_case_de, bad_case_en = 0, 0
 
     glob_filter = os.path.join(audio_dir, "*.json")
     for json_file_path in glob.glob(glob_filter):
@@ -155,6 +156,7 @@ def deal_with_emilia_audio_dir(audio_dir):
 
 def deal_with_cv_obj(obj, duration):
     text = obj["text"]
+
     if obj["language"] == "de":
         if (
             obj["wav"] in cv_out_de
@@ -202,7 +204,7 @@ def main():
             for audio_dir in emilia_dataset_path.iterdir()
             if audio_dir.is_dir()
         ]
-
+    
     for futures in tqdm(futures, total=len(futures)):
         sub_result, durations, vocab_set, bad_case_de, bad_case_en = futures.result()
         result.extend(sub_result)
@@ -210,54 +212,90 @@ def main():
         text_vocab_set.update(vocab_set)
         total_bad_case_de += bad_case_de
         total_bad_case_en += bad_case_en
+
     executor.shutdown()
+
+    # Split dataset
+    train_ratio, val_ratio, test_ratio = 0.8, 0.1, 0.1
+    train_data, temp_data = train_test_split(result, test_size=(1 - train_ratio), random_state=42)
+    val_data, test_data = train_test_split(temp_data, test_size=(test_ratio / (val_ratio + test_ratio)), random_state=42)
+
+    emilia_splits = {
+        "train": train_data,
+        "validation": val_data,
+        "test": test_data,
+    }
 
     # Process Common Voice dataset
     for lang in cv_langs:
         cv_dataset_path = Path(os.path.join(cv_dataset_dir, lang))
 
-        # Load the train.tsv file
-        train_tsv_path = cv_dataset_path / "train.tsv"
-        train_df = pd.read_csv(train_tsv_path, sep="\t")
+        result = {"train": [], "validation": [], "test": []}
 
         # Load the clip_durations.tsv file and create a dictionary of durations
         clip_durations_path = cv_dataset_path / "clip_durations.tsv"
         duration_df = pd.read_csv(clip_durations_path, sep="\t")
         duration_map = dict(zip(duration_df["clip"], duration_df["duration[ms]"] / 1000))  # Convert ms to seconds
 
-        # Submit jobs to the executor
-        for _, row in tqdm(train_df.iterrows(), total=len(train_df)):
-            obj = {
-                "wav": row["path"],
-                "text": row["sentence"],
-                "language": row["locale"],
-            }
-            duration = duration_map.get(row["path"], None)
-            if duration is None:
-                raise ValueError(f"Duration is None for path: {['path']}")
+        for split_name, tsv_file in [("train", "train.tsv"), ("validation", "dev.tsv"), ("test", "test.tsv")]:
+            tsv_path = cv_dataset_path / tsv_file
+            if os.path.exists(tsv_path):
+                df = pd.read_csv(tsv_path, sep="\t")
+                for _, row in tqdm(df.iterrows(), total=len(df)):
+                    obj = {
+                        "wav": row["path"],
+                        "text": row["sentence"],
+                        "language": row["locale"],
+                    }
+                    duration = duration_map.get(row["path"], None)
+                    if duration is None:
+                        raise ValueError(f"Duration is None for path: {['path']}")
+                    # check if obj text is nan
+                    if obj["text"] != obj["text"]:
+                        print(f"Text is nan: {obj['text']}")
+                        print(f"Path: {obj['wav']}")
+                        print(f"Duration: {duration}")
+                        print(f"Language: {obj['language']}")
+                        print()
+                        print(split_name)
+                        continue
+                    sub_result, durations, vocab_set, bad_case_de, bad_case_en = deal_with_cv_obj(obj, duration)
+                    result[split_name].extend(sub_result)
+                    duration_list.extend(durations)
+                    text_vocab_set.update(vocab_set)
+                    total_bad_case_de += bad_case_de
+                    total_bad_case_en += bad_case_en
 
-            # same processing logic as for EMILIA
-            sub_result, durations, vocab_set, bad_case_de, bad_case_en = deal_with_cv_obj(obj, duration)
-            result.extend(sub_result)
-            duration_list.extend(durations)
-            text_vocab_set.update(vocab_set)
-            total_bad_case_de += bad_case_de
-            total_bad_case_en += bad_case_en
+
+    cv_splits = result
+
+    combined_splits = {key: cv_splits[key] + emilia_splits[key] for key in ["train", "validation", "test"]}
+
+    split_durations = {
+        "train": [line["duration"] for line in combined_splits["train"]],
+        "validation": [line["duration"] for line in combined_splits["validation"]],
+        "test": [line["duration"] for line in combined_splits["test"]],
+    }
 
     # save preprocessed dataset to disk
     if not os.path.exists(f"{save_dir}"):
         os.makedirs(f"{save_dir}")
     print(f"\nSaving to {save_dir} ...")
 
-    # dataset = Dataset.from_dict({"audio_path": audio_path_list, "text": text_list, "duration": duration_list})  # oom
-    # dataset.save_to_disk(f"{save_dir}/raw", max_shard_size="2GB")
-    with ArrowWriter(path=f"{save_dir}/raw.arrow") as writer:
-        for line in tqdm(result, desc="Writing to raw.arrow ..."):
-            writer.write(line)
+    for split_name, split_data in combined_splits.items():
+        os.makedirs(save_dir, exist_ok=True)
+        arrow_path = os.path.join(save_dir, f"{split_name}.arrow")
+        print(f"Saving {split_name} data to {arrow_path} ...")
 
-    # dup a json separately saving duration in case for DynamicBatchSampler ease
-    with open(f"{save_dir}/duration.json", "w", encoding="utf-8") as f:
-        json.dump({"duration": duration_list}, f, ensure_ascii=False)
+        with ArrowWriter(path=arrow_path) as writer:
+            for line in tqdm(split_data, desc=f"Writing {split_name} to Arrow"):
+                writer.write(line)
+
+    # dump jsons separately saving duration in case for DynamicBatchSampler ease
+    for split_name, durations in split_durations.items():
+        duration_file = f"{save_dir}/{split_name}_duration.json"
+        with open(duration_file, "w", encoding="utf-8") as f:
+            json.dump({"duration": durations}, f, ensure_ascii=False)
 
     # vocab map, i.e. tokenizer
     # add alphabets and symbols (optional, if plan to ft on de/fr etc.)

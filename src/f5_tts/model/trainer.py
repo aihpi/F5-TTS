@@ -208,8 +208,42 @@ class Trainer:
         del checkpoint
         gc.collect()
         return step
+    
 
-    def train(self, train_dataset: Dataset, num_workers=16, resumable_with_seed: int = None):
+    def evaluate(self, dataloader, split="Validation", step=None):
+        self.model.eval()
+        losses = []
+
+        with torch.no_grad():
+            for batch in tqdm(
+                dataloader,
+                desc=f"Evaluating {split} set at Step {step}",
+                disable=not self.accelerator.is_local_main_process,
+            ):
+                text_inputs = batch["text"]
+                mel_spec = batch["mel"].permute(0, 2, 1)
+                mel_lengths = batch["mel_lengths"]
+
+                loss, _, _ = self.model(
+                    mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler
+                )
+                losses.append(loss.item())
+
+        avg_loss = torch.tensor(losses).mean().item()
+        if self.accelerator.is_local_main_process:
+            self.accelerator.log({f"{split} Loss": avg_loss}, step=step)
+        print(f"{split} Loss at Step {step}: {avg_loss}")
+        return avg_loss
+        
+
+    def train(
+        self,
+        train_dataset: Dataset,
+        validation_dataset: Dataset | None = None,
+        num_workers=16,
+        resumable_with_seed: int = None,
+    ):
+        """Train the model with optional validation after each epoch."""
         if self.log_samples:
             from f5_tts.infer.utils_infer import cfg_strength, load_vocoder, nfe_step, sway_sampling_coef
 
@@ -224,33 +258,43 @@ class Trainer:
         else:
             generator = None
 
-        if self.batch_size_type == "sample":
-            train_dataloader = DataLoader(
-                train_dataset,
-                collate_fn=collate_fn,
-                num_workers=num_workers,
-                pin_memory=True,
-                persistent_workers=True,
-                batch_size=self.batch_size,
-                shuffle=True,
-                generator=generator,
-            )
-        elif self.batch_size_type == "frame":
-            self.accelerator.even_batches = False
-            sampler = SequentialSampler(train_dataset)
-            batch_sampler = DynamicBatchSampler(
-                sampler, self.batch_size, max_samples=self.max_samples, random_seed=resumable_with_seed, drop_last=False
-            )
-            train_dataloader = DataLoader(
-                train_dataset,
-                collate_fn=collate_fn,
-                num_workers=num_workers,
-                pin_memory=True,
-                persistent_workers=True,
-                batch_sampler=batch_sampler,
-            )
-        else:
-            raise ValueError(f"batch_size_type must be either 'sample' or 'frame', but received {self.batch_size_type}")
+        # Create dataloaders for train and validation
+        def create_dataloader(dataset, shuffle=False):
+            if self.batch_size_type == "sample":
+                return DataLoader(
+                    dataset,
+                    collate_fn=collate_fn,
+                    num_workers=num_workers,
+                    pin_memory=True,
+                    persistent_workers=True,
+                    batch_size=self.batch_size,
+                    shuffle=shuffle,
+                    generator=generator if shuffle else None,
+                )
+            elif self.batch_size_type == "frame":
+                self.accelerator.even_batches = False
+                sampler = SequentialSampler(dataset)
+                batch_sampler = DynamicBatchSampler(
+                    sampler, self.batch_size, max_samples=self.max_samples, random_seed=resumable_with_seed, drop_last=False
+                )
+                return DataLoader(
+                    dataset,
+                    collate_fn=collate_fn,
+                    num_workers=num_workers,
+                    pin_memory=True,
+                    persistent_workers=True,
+                    batch_sampler=batch_sampler,
+                )
+            else:
+                raise ValueError(f"batch_size_type must be either 'sample' or 'frame', but received {self.batch_size_type}")
+
+        train_dataloader = create_dataloader(train_dataset, shuffle=True)
+
+        print(f"Training with {len(train_dataloader)} steps per epoch")
+
+        validation_dataloader = create_dataloader(validation_dataset, shuffle=False) if validation_dataset else None
+
+        print(f"Validation with {len(validation_dataloader)} steps")
 
         #  accelerator.prepare() dispatches batches to devices;
         #  which means the length of dataloader calculated before, should consider the number of devices
@@ -265,8 +309,8 @@ class Trainer:
         self.scheduler = SequentialLR(
             self.optimizer, schedulers=[warmup_scheduler, decay_scheduler], milestones=[warmup_steps]
         )
-        train_dataloader, self.scheduler = self.accelerator.prepare(
-            train_dataloader, self.scheduler
+        train_dataloader, validation_dataloader, self.scheduler = self.accelerator.prepare(
+            train_dataloader, validation_dataloader, self.scheduler
         )  # actual steps = 1 gpu steps / gpus
         start_step = self.load_checkpoint()
         global_step = start_step
@@ -284,7 +328,7 @@ class Trainer:
             if exists(resumable_with_seed) and epoch == skipped_epoch:
                 progress_bar = tqdm(
                     skipped_dataloader,
-                    desc=f"Epoch {epoch+1}/{self.epochs}",
+                    desc=f"Epoch {epoch+1}/{self.epochs} [Train]",
                     unit="step",
                     disable=not self.accelerator.is_local_main_process,
                     initial=skipped_batch,
@@ -293,7 +337,7 @@ class Trainer:
             else:
                 progress_bar = tqdm(
                     train_dataloader,
-                    desc=f"Epoch {epoch+1}/{self.epochs}",
+                    desc=f"Epoch {epoch+1}/{self.epochs} [Train]",
                     unit="step",
                     disable=not self.accelerator.is_local_main_process,
                 )
@@ -327,7 +371,7 @@ class Trainer:
                 global_step += 1
 
                 if self.accelerator.is_local_main_process:
-                    self.accelerator.log({"loss": loss.item(), "lr": self.scheduler.get_last_lr()[0]}, step=global_step)
+                    self.accelerator.log({"train_loss": loss.item(), "lr": self.scheduler.get_last_lr()[0]}, step=global_step)
                     if self.logger == "tensorboard":
                         self.writer.add_scalar("loss", loss.item(), global_step)
                         self.writer.add_scalar("lr", self.scheduler.get_last_lr()[0], global_step)
@@ -335,6 +379,9 @@ class Trainer:
                 progress_bar.set_postfix(step=str(global_step), loss=loss.item())
 
                 if global_step % (self.save_per_updates * self.grad_accumulation_steps) == 0:
+                    if validation_dataset:
+                        self.evaluate(validation_dataloader, split="Validation", step=global_step)
+
                     self.save_checkpoint(global_step)
 
                     if self.log_samples and self.accelerator.is_local_main_process:

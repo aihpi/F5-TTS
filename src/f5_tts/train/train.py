@@ -94,9 +94,11 @@ def main():
     )
 
     train_dataset = load_dataset(dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs)
+    validation_dataset = load_dataset(dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs, split="validation")
     print(train_dataset[0])
     trainer.train(
         train_dataset,
+        validation_dataset,
         resumable_with_seed=666,  # seed for shuffling dataset
     )
 

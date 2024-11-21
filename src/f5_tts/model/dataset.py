@@ -231,30 +231,32 @@ def load_dataset(
     audio_type: str = "raw",
     mel_spec_module: nn.Module | None = None,
     mel_spec_kwargs: dict = dict(),
+    split: str = "train",
 ) -> CustomDataset | HFDataset:
     """
     dataset_type    - "CustomDataset" if you want to use tokenizer name and default data path to load for train_dataset
                     - "CustomDatasetPath" if you just want to pass the full path to a preprocessed dataset without relying on tokenizer
+    split           - "train", "validation", or "test" for split-specific dataset loading
     """
 
-    print("Loading dataset ...")
+    print(f"Loading dataset for split: {split} ...")
 
     if dataset_type == "CustomDataset":
         rel_data_path = str(files("f5_tts").joinpath(f"../../data/{dataset_name}_{tokenizer}"))
         if audio_type == "raw":
             try:
-                train_dataset = load_from_disk(f"{rel_data_path}/raw")
+                dataset = load_from_disk(f"{rel_data_path}/{split}")
             except:  # noqa: E722
-                train_dataset = Dataset_.from_file(f"{rel_data_path}/raw.arrow")
+                dataset = Dataset_.from_file(f"{rel_data_path}/{split}.arrow")
             preprocessed_mel = False
         elif audio_type == "mel":
-            train_dataset = Dataset_.from_file(f"{rel_data_path}/mel.arrow")
+            dataset = Dataset_.from_file(f"{rel_data_path}/{split}.arrow")
             preprocessed_mel = True
-        with open(f"{rel_data_path}/duration.json", "r", encoding="utf-8") as f:
+        with open(f"{rel_data_path}/{split}_duration.json", "r", encoding="utf-8") as f:
             data_dict = json.load(f)
         durations = data_dict["duration"]
-        train_dataset = CustomDataset(
-            train_dataset,
+        dataset = CustomDataset(
+            dataset,
             durations=durations,
             preprocessed_mel=preprocessed_mel,
             mel_spec_module=mel_spec_module,
@@ -263,15 +265,15 @@ def load_dataset(
 
     elif dataset_type == "CustomDatasetPath":
         try:
-            train_dataset = load_from_disk(f"{dataset_name}/raw")
+            dataset = load_from_disk(f"{dataset_name}/{split}")
         except:  # noqa: E722
-            train_dataset = Dataset_.from_file(f"{dataset_name}/raw.arrow")
+            dataset = Dataset_.from_file(f"{dataset_name}/{split}.arrow")
 
-        with open(f"{dataset_name}/duration.json", "r", encoding="utf-8") as f:
+        with open(f"{dataset_name}/{split}_duration.json", "r", encoding="utf-8") as f:
             data_dict = json.load(f)
         durations = data_dict["duration"]
-        train_dataset = CustomDataset(
-            train_dataset, durations=durations, preprocessed_mel=preprocessed_mel, **mel_spec_kwargs
+        dataset = CustomDataset(
+            dataset, durations=durations, preprocessed_mel=preprocessed_mel, **mel_spec_kwargs
         )
 
     elif dataset_type == "HFDataset":
@@ -280,11 +282,11 @@ def load_dataset(
             + "May also the corresponding script cuz different dataset may have different format."
         )
         pre, post = dataset_name.split("_")
-        train_dataset = HFDataset(
-            load_dataset(f"{pre}/{pre}", split=f"train.{post}", cache_dir=str(files("f5_tts").joinpath("../../data"))),
+        dataset = HFDataset(
+            load_dataset(f"{pre}/{pre}", split=f"{split}.{post}", cache_dir=str(files("f5_tts").joinpath("../../data"))),
         )
 
-    return train_dataset
+    return dataset
 
 
 # collation
