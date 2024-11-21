@@ -321,6 +321,7 @@ def main():
         print(f"Bad de transcription case: {total_bad_case_de}")
     if "EN" in emilia_langs:
         print(f"Bad en transcription case: {total_bad_case_en}\n")
+    print(f"Bad duration case: {total_bad_case_duration}\n")
 
 
 def check_vocab():
