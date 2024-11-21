@@ -227,13 +227,22 @@ class Trainer:
                 loss, _, _ = self.model(
                     mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler
                 )
-                losses.append(loss.item())
+                # Collect losses for this batch
+                losses.append(loss)
 
-        avg_loss = torch.tensor(losses).mean().item()
+        # Aggregate losses across all devices
+        all_losses = torch.stack(losses)  # List to tensor
+        all_losses = self.accelerator.gather(all_losses)  # Gather losses across all devices
+
+        # Compute the average loss
+        avg_loss = all_losses.mean().item()
+
+        # Log the loss only on the main process
         if self.accelerator.is_local_main_process:
             self.accelerator.log({f"{split} Loss": avg_loss}, step=step)
         print(f"{split} Loss at Step {step}: {avg_loss}")
         return avg_loss
+
         
 
     def train(
@@ -288,13 +297,15 @@ class Trainer:
             else:
                 raise ValueError(f"batch_size_type must be either 'sample' or 'frame', but received {self.batch_size_type}")
 
+        # Train Dataloader
         train_dataloader = create_dataloader(train_dataset, shuffle=True)
+        if self.accelerator.is_main_process:
+            print(f"Training with {len(train_dataloader)} steps per epoch")
 
-        print(f"Training with {len(train_dataloader)} steps per epoch")
-
+        # Validation Dataloader
         validation_dataloader = create_dataloader(validation_dataset, shuffle=False) if validation_dataset else None
-
-        print(f"Validation with {len(validation_dataloader)} steps")
+        if validation_dataloader and self.accelerator.is_main_process:
+            print(f"Validation with {len(validation_dataloader)} steps")
 
         #  accelerator.prepare() dispatches batches to devices;
         #  which means the length of dataloader calculated before, should consider the number of devices
