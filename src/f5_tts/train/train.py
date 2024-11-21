@@ -7,7 +7,6 @@ from f5_tts.model.dataset import load_dataset
 from f5_tts.model.utils import get_tokenizer
 
 # -------------------------- Dataset Settings --------------------------- #
-
 target_sample_rate = 24000
 n_mel_channels = 100
 hop_length = 256
@@ -21,7 +20,7 @@ dataset_name = "CV_de_Emilia_DE"
 
 # -------------------------- Training Settings -------------------------- #
 
-exp_name = "F5TTS_Base"  # F5TTS_Base | E2TTS_Base
+exp_name = "F5TTS_Split"  # F5TTS_Base | E2TTS_Base
 
 learning_rate = 1e-5
 
@@ -36,15 +35,10 @@ num_warmup_updates = 5000  # warmup steps
 save_per_updates = 1000  # save checkpoint per steps
 last_per_steps = 1000  # save last checkpoint per steps
 
-# model params
-if exp_name == "F5TTS_Base":
-    wandb_resume_id = None
-    model_cls = DiT
-    model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
-elif exp_name == "E2TTS_Base":
-    wandb_resume_id = None
-    model_cls = UNetT
-    model_cfg = dict(dim=1024, depth=24, heads=16, ff_mult=4)
+
+wandb_resume_id = None
+model_cls = DiT
+model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
 
 
 # ----------------------------------------------------------------------- #

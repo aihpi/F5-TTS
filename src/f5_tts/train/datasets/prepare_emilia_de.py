@@ -216,7 +216,7 @@ def main():
     executor.shutdown()
 
     # Split dataset
-    train_ratio, val_ratio, test_ratio = 0.8, 0.1, 0.1
+    train_ratio, val_ratio, test_ratio = 0.98, 0.01, 0.01
     train_data, temp_data = train_test_split(result, test_size=(1 - train_ratio), random_state=42)
     val_data, test_data = train_test_split(temp_data, test_size=(test_ratio / (val_ratio + test_ratio)), random_state=42)
 
