@@ -208,7 +208,6 @@ class Trainer:
         del checkpoint
         gc.collect()
         return step
-    
 
     def evaluate(self, dataloader, split="Validation", step=None):
         self.model.eval()
@@ -216,9 +215,9 @@ class Trainer:
 
         with torch.no_grad():
             for batch in tqdm(
-                dataloader,
-                desc=f"Evaluating {split} set at Step {step}",
-                disable=not self.accelerator.is_local_main_process,
+                    dataloader,
+                    desc=f"Evaluating {split} set at Step {step}",
+                    disable=not self.accelerator.is_local_main_process,
             ):
                 text_inputs = batch["text"]
                 mel_spec = batch["mel"].permute(0, 2, 1)
@@ -232,17 +231,20 @@ class Trainer:
 
         # Aggregate losses across all devices
         all_losses = torch.stack(losses)  # List to tensor
-        all_losses = self.accelerator.gather(all_losses)  # Gather losses across all devices
 
-        # Compute the average loss
-        avg_loss = all_losses.mean().item()
+        # Calculate mean for this device
+        device_mean = all_losses.mean()
+
+        # Gather means from all devices and average them
+        gathered_means = self.accelerator.gather(device_mean.unsqueeze(0))
+        avg_loss = gathered_means.mean().item()
 
         # Log the loss only on the main process
         if self.accelerator.is_local_main_process:
             self.accelerator.log({f"{split} Loss": avg_loss}, step=step)
-        print(f"{split} Loss at Step {step}: {avg_loss}")
-        return avg_loss
+            print(f"{split} Loss at Step {step}: {avg_loss}")
 
+        return avg_loss
         
 
     def train(
