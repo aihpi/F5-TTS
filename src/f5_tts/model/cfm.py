@@ -82,7 +82,10 @@ class CFM(nn.Module):
     def sample(
         self,
         cond: float["b n d"] | float["b nw"],  # noqa: F722
-        text: int["b nt"] | list[str],  # noqa: F722
+        token_ids: torch.LongTensor, # b x n_token
+        token_ids_mask: torch.LongTensor, # b x n_token
+        char_ids: torch.LongTensor, # b x n_token x n_char
+        char_ids_mask: torch.LongTensor, # b x n_token x n_char
         duration: int | int["b"],  # noqa: F821
         *,
         lens: int["b"] | None = None,  # noqa: F821
@@ -111,17 +114,8 @@ class CFM(nn.Module):
         if not exists(lens):
             lens = torch.full((batch,), cond_seq_len, device=device, dtype=torch.long)
 
-        # text
-
-        if isinstance(text, list):
-            if exists(self.vocab_char_map):
-                text = list_str_to_idx(text, self.vocab_char_map).to(device)
-            else:
-                text = list_str_to_tensor(text).to(device)
-            assert text.shape[0] == batch
-
-        if exists(text):
-            text_lens = (text != -1).sum(dim=-1)
+        if exists(char_ids_mask):
+            text_lens = char_ids_mask.sum(dim=-1).sum(dim=-1)
             lens = torch.maximum(text_lens, lens)  # make sure lengths are at least those of the text characters
 
         # duration
@@ -165,13 +159,31 @@ class CFM(nn.Module):
 
             # predict flow
             pred = self.transformer(
-                x=x, cond=step_cond, text=text, time=t, mask=mask, drop_audio_cond=False, drop_text=False
+                x=x,
+                cond=step_cond,
+                token_ids=token_ids,
+                token_ids_mask=token_ids_mask,
+                char_ids=char_ids,
+                char_ids_mask=char_ids_mask,
+                time=t,
+                mask=mask,
+                drop_audio_cond=False,
+                drop_text=False
             )
             if cfg_strength < 1e-5:
                 return pred
 
             null_pred = self.transformer(
-                x=x, cond=step_cond, text=text, time=t, mask=mask, drop_audio_cond=True, drop_text=True
+                x=x,
+                cond=step_cond,
+                token_ids=token_ids,
+                token_ids_mask=token_ids_mask,
+                char_ids=char_ids,
+                char_ids_mask=char_ids_mask,
+                time=t,
+                mask=mask,
+                drop_audio_cond=True,
+                drop_text=True
             )
             return pred + (pred - null_pred) * cfg_strength
 
@@ -212,7 +224,10 @@ class CFM(nn.Module):
     def forward(
         self,
         inp: float["b n d"] | float["b nw"],  # mel or raw wave  # noqa: F722
-        text: int["b nt"] | list[str],  # noqa: F722
+        token_ids: torch.LongTensor, # b x n_token
+        token_ids_mask: torch.LongTensor, # b x n_token
+        char_ids: torch.LongTensor, # b x n_token x n_char
+        char_ids_mask: torch.LongTensor, # b x n_token x n_char
         *,
         lens: int["b"] | None = None,  # noqa: F821
         noise_scheduler: str | None = None,
@@ -224,14 +239,6 @@ class CFM(nn.Module):
             assert inp.shape[-1] == self.num_channels
 
         batch, seq_len, dtype, device, _σ1 = *inp.shape[:2], inp.dtype, self.device, self.sigma
-
-        # handle text as string
-        if isinstance(text, list):
-            if exists(self.vocab_char_map):
-                text = list_str_to_idx(text, self.vocab_char_map).to(device)
-            else:
-                text = list_str_to_tensor(text).to(device)
-            assert text.shape[0] == batch
 
         # lens and mask
         if not exists(lens):
@@ -275,7 +282,15 @@ class CFM(nn.Module):
         # if want rigourously mask out padding, record in collate_fn in dataset.py, and pass in here
         # adding mask will use more memory, thus also need to adjust batchsampler with scaled down threshold for long sequences
         pred = self.transformer(
-            x=φ, cond=cond, text=text, time=time, drop_audio_cond=drop_audio_cond, drop_text=drop_text
+            x=φ,
+            cond=cond,
+            token_ids=token_ids,
+            token_ids_mask=token_ids_mask,
+            char_ids=char_ids,
+            char_ids_mask=char_ids_mask,
+            time=time,
+            drop_audio_cond=drop_audio_cond,
+            drop_text=drop_text
         )
 
         # flow matching loss

@@ -294,28 +294,89 @@ def load_dataset(
     return dataset
 
 
-# collation
+def get_collate_fn(tokenizer, vocab_char_map=None):
+    def collate_fn(batch):
+        # Step 0: Mel Specs
+        mel_specs = [item["mel_spec"].squeeze(0) for item in batch]
+        mel_lengths = torch.LongTensor([spec.shape[-1] for spec in mel_specs])
+        max_mel_length = mel_lengths.amax()
 
+        padded_mel_specs = []
+        for spec in mel_specs:  # TODO. maybe records mask for attention here
+            padding = (0, max_mel_length - spec.size(-1))
+            padded_spec = F.pad(spec, padding, value=0)
+            padded_mel_specs.append(padded_spec)
 
-def collate_fn(batch):
-    mel_specs = [item["mel_spec"].squeeze(0) for item in batch]
-    mel_lengths = torch.LongTensor([spec.shape[-1] for spec in mel_specs])
-    max_mel_length = mel_lengths.amax()
+        mel_specs = torch.stack(padded_mel_specs)
 
-    padded_mel_specs = []
-    for spec in mel_specs:  # TODO. maybe records mask for attention here
-        padding = (0, max_mel_length - spec.size(-1))
-        padded_spec = F.pad(spec, padding, value=0)
-        padded_mel_specs.append(padded_spec)
+        # Step 1: Preprocess text (stored as list of chars)
+        texts = ["".join(item["text"]) for item in batch]
 
-    mel_specs = torch.stack(padded_mel_specs)
+        # Step 2: Tokenize text
+        tokenized = tokenizer(
+            texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            return_offsets_mapping=True,
+            add_special_tokens=False,
+        )
+        token_ids = tokenized["input_ids"]  # [batch, token_seq_len]
+        token_ids_mask = tokenized["attention_mask"]  # [batch, token_seq_len]
+        offset_mapping = tokenized["offset_mapping"]  # [batch, token_seq_len, 2]
 
-    text = [item["text"] for item in batch]
-    text_lengths = torch.LongTensor([len(item) for item in text])
+        # Step 3: Get max_token_char_len from offset_mapping (including spaces)
+        max_token_char_len = 0
+        for offsets in offset_mapping:
+            previous_end = 0
+            for start, end in offsets:
+                spaces = max(0, start - previous_end)
+                token_char_len = spaces + (end - start)
+                max_token_char_len = max(max_token_char_len, token_char_len)
+                previous_end = end
 
-    return dict(
-        mel=mel_specs,
-        mel_lengths=mel_lengths,
-        text=text,
-        text_lengths=text_lengths,
-    )
+        # Step 4: Prepare character-level encoding
+        batch_size, token_seq_len = token_ids.shape
+        char_ids = torch.zeros(
+            (batch_size, token_seq_len, max_token_char_len), dtype=torch.long
+        )
+        char_ids_mask = torch.zeros(
+            (batch_size, token_seq_len, max_token_char_len), dtype=torch.long
+        )
+
+        for i, (text, offsets) in enumerate(zip(texts, offset_mapping)):
+            previous_end = 0  # Track the end of the previous token
+
+            for token_idx, (start, end) in enumerate(offsets):
+                num_spaces = start - previous_end
+                previous_end = end
+                if num_spaces == 0 and start == end:  # Padding tokens
+                    continue
+
+                # Extract characters for the token
+                raw_chars = text[start:end]
+
+                # Convert characters to indices
+                chars = ([vocab_char_map.get(" ") if vocab_char_map else ord(" ") for _ in range(num_spaces)] +
+                          [vocab_char_map.get(c, 0) if vocab_char_map else ord(c) for c in raw_chars])
+                padding = [-1] * (max_token_char_len - len(chars))
+                combined = chars + padding
+
+                assert max_token_char_len >= len(combined)
+
+                # Assign to char_ids
+                char_ids[i, token_idx, :] = torch.tensor(combined)
+
+                # Mask: Set 1 for valid character indices, 0 for padding
+                char_ids_mask[i, token_idx, :len(chars)] = 1
+
+        return {
+            "mel": mel_specs,
+            "mel_lengths": mel_lengths,
+            "token_ids": token_ids,
+            "token_ids_mask": token_ids_mask,
+            "char_ids": char_ids,
+            "char_ids_mask": char_ids_mask,
+        }
+
+    return collate_fn

@@ -2,6 +2,8 @@
 
 from importlib.resources import files
 
+from transformers import AutoModelForCausalLM
+
 from f5_tts.model import CFM, DiT, Trainer, UNetT
 from f5_tts.model.dataset import load_dataset
 from f5_tts.model.utils import get_tokenizer
@@ -12,17 +14,17 @@ n_mel_channels = 100
 hop_length = 256
 win_length = 1024
 n_fft = 1024
-mel_spec_type = "vocos"  # 'vocos' or 'bigvgan'
-
+mel_spec_type = "bigvgan"  # 'vocos' or 'bigvgan'
+token_embedding_model_name = "meta-llama/Llama-3.2-3B"
 tokenizer = "pinyin"  # 'pinyin', 'char', or 'custom'
 tokenizer_path = None  # if tokenizer = 'custom', define the path to the tokenizer you want to use (should be vocab.txt)
 dataset_name = "CV_de_Emilia_DE"
 
 # -------------------------- Training Settings -------------------------- #
 
-exp_name = "F5TTS_Split"  # F5TTS_Base | E2TTS_Base
+exp_name = "F5TTS_DE_bigvgan-Fusion_Llama-3B"  # F5TTS_Base | E2TTS_Base
 
-learning_rate = 1e-5
+learning_rate = 5e-5
 
 batch_size_per_gpu = 19200  # 8 GPUs, 8 * 38400 = 307200
 batch_size_type = "frame"  # "frame" or "sample"
@@ -60,8 +62,25 @@ def main():
         mel_spec_type=mel_spec_type,
     )
 
+    token_embedding_model = AutoModelForCausalLM.from_pretrained(token_embedding_model_name, trust_remote_code=True)
+    token_embedding_model.config.pad_token_id = token_embedding_model.config.eos_token_id
+    token_embeds = token_embedding_model.get_input_embeddings()
+
+    pad_token_id = token_embedding_model.config.pad_token_id
+    token_num_embeds =  token_embedding_model.config.vocab_size
+    token_dim = token_embedding_model.config.hidden_size
+    transformer = model_cls(
+        **model_cfg,
+        text_num_embeds=vocab_size,
+        mel_dim=n_mel_channels,
+        pad_token_id=pad_token_id,
+        token_num_embeds=token_num_embeds,
+        token_dim=token_dim,
+    )
+    transformer.set_token_embeddings(token_embeds)
+
     model = CFM(
-        transformer=model_cls(**model_cfg, text_num_embeds=vocab_size, mel_dim=n_mel_channels),
+        transformer=transformer,
         mel_spec_kwargs=mel_spec_kwargs,
         vocab_char_map=vocab_char_map,
     )
@@ -73,6 +92,8 @@ def main():
         num_warmup_updates=num_warmup_updates,
         save_per_updates=save_per_updates,
         checkpoint_path=str(files("f5_tts").joinpath(f"../../ckpts/{exp_name}")),
+        vocab_char_map=vocab_char_map,
+        token_embedding_model_name=token_embedding_model_name,
         batch_size=batch_size_per_gpu,
         batch_size_type=batch_size_type,
         max_samples=max_samples,
@@ -83,7 +104,7 @@ def main():
         wandb_run_name=exp_name,
         wandb_resume_id=wandb_resume_id,
         last_per_steps=last_per_steps,
-        log_samples=True,
+        log_samples=False,
         mel_spec_type=mel_spec_type,
     )
 

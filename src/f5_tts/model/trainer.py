@@ -13,9 +13,10 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LinearLR, SequentialLR
 from torch.utils.data import DataLoader, Dataset, SequentialSampler
 from tqdm import tqdm
+from transformers import AutoTokenizer
 
 from f5_tts.model import CFM
-from f5_tts.model.dataset import DynamicBatchSampler, collate_fn
+from f5_tts.model.dataset import DynamicBatchSampler, get_collate_fn
 from f5_tts.model.utils import default, exists
 
 # trainer
@@ -30,6 +31,8 @@ class Trainer:
         num_warmup_updates=20000,
         save_per_updates=1000,
         checkpoint_path=None,
+        vocab_char_map: dict[str:int] | None = None,
+        token_embedding_model_name = None,
         batch_size=32,
         batch_size_type: str = "sample",
         max_samples=32,
@@ -106,6 +109,9 @@ class Trainer:
             self.writer = SummaryWriter(log_dir=f"runs/{wandb_run_name}")
 
         self.model = model
+        self.vocab_char_map = vocab_char_map
+        self.tokenizer = AutoTokenizer.from_pretrained(token_embedding_model_name)
+        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
         if self.is_main:
             self.ema_model = EMA(model, include_online_model=False, **ema_kwargs)
@@ -183,7 +189,7 @@ class Trainer:
                 del checkpoint["ema_model_state_dict"][key]
 
         if self.is_main:
-            self.ema_model.load_state_dict(checkpoint["ema_model_state_dict"])
+            self.ema_model.load_state_dict(checkpoint["ema_model_state_dict"], strict=False)
 
         if "step" in checkpoint:
             # patch for backward compatibility, 305e3ea
@@ -191,8 +197,8 @@ class Trainer:
                 if key in checkpoint["model_state_dict"]:
                     del checkpoint["model_state_dict"][key]
 
-            self.accelerator.unwrap_model(self.model).load_state_dict(checkpoint["model_state_dict"])
-            self.accelerator.unwrap_model(self.optimizer).load_state_dict(checkpoint["optimizer_state_dict"])
+            self.accelerator.unwrap_model(self.model).load_state_dict(checkpoint["model_state_dict"], strict=False)
+            self.accelerator.unwrap_model(self.optimizer).load_state_dict(checkpoint["optimizer_state_dict"], strict=False)
             if self.scheduler:
                 self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
             step = checkpoint["step"]
@@ -202,7 +208,7 @@ class Trainer:
                 for k, v in checkpoint["ema_model_state_dict"].items()
                 if k not in ["initted", "step"]
             }
-            self.accelerator.unwrap_model(self.model).load_state_dict(checkpoint["model_state_dict"])
+            self.accelerator.unwrap_model(self.model).load_state_dict(checkpoint["model_state_dict"], strict=False)
             step = 0
 
         del checkpoint
@@ -219,12 +225,21 @@ class Trainer:
                     desc=f"Evaluating {split} set at Step {step}",
                     disable=not self.accelerator.is_local_main_process,
             ):
-                text_inputs = batch["text"]
+                token_ids = batch["token_ids"]
+                token_ids_mask = batch["token_ids_mask"]
+                char_ids = batch["char_ids"]
+                char_ids_mask = batch["char_ids_mask"]
                 mel_spec = batch["mel"].permute(0, 2, 1)
                 mel_lengths = batch["mel_lengths"]
 
                 loss, _, _ = self.model(
-                    mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler
+                    mel_spec,
+                    token_ids=token_ids,
+                    token_ids_mask=token_ids_mask,
+                    char_ids=char_ids,
+                    char_ids_mask=char_ids_mask,
+                    lens=mel_lengths,
+                    noise_scheduler=self.noise_scheduler
                 )
                 # Collect losses for this batch
                 losses.append(loss)
@@ -269,6 +284,7 @@ class Trainer:
         else:
             generator = None
 
+        collate_fn = get_collate_fn(tokenizer=self.tokenizer, vocab_char_map=self.vocab_char_map)
         # Create dataloaders for train and validation
         def create_dataloader(dataset, shuffle=False):
             if self.batch_size_type == "sample":
@@ -357,7 +373,10 @@ class Trainer:
 
             for batch in progress_bar:
                 with self.accelerator.accumulate(self.model):
-                    text_inputs = batch["text"]
+                    token_ids = batch["token_ids"]
+                    token_ids_mask = batch["token_ids_mask"]
+                    char_ids = batch["char_ids"]
+                    char_ids_mask = batch["char_ids_mask"]
                     mel_spec = batch["mel"].permute(0, 2, 1)
                     mel_lengths = batch["mel_lengths"]
 
@@ -367,7 +386,13 @@ class Trainer:
                         self.accelerator.log({"duration loss": dur_loss.item()}, step=global_step)
 
                     loss, cond, pred = self.model(
-                        mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler
+                        mel_spec,
+                        token_ids=token_ids,
+                        token_ids_mask=token_ids_mask,
+                        char_ids=char_ids,
+                        char_ids_mask=char_ids_mask,
+                        lens=mel_lengths,
+                        noise_scheduler=self.noise_scheduler
                     )
                     self.accelerator.backward(loss)
 
@@ -407,9 +432,16 @@ class Trainer:
                             f"{log_samples_path}/step_{global_step}_ref.wav", ref_audio.cpu(), target_sample_rate
                         )
                         with torch.no_grad():
+                            double_token_ids = token_ids.repeat(1, 2)
+                            double_token_ids_mask = token_ids_mask.repeat(1, 2)
+                            double_char_ids = char_ids.repeat(1, 2, 1)
+                            double_char_ids_mask = char_ids_mask.repeat(1, 2, 1)
                             generated, _ = self.accelerator.unwrap_model(self.model).sample(
                                 cond=mel_spec[0][:ref_audio_len].unsqueeze(0),
-                                text=[text_inputs[0] + [" "] + text_inputs[0]],
+                                token_ids=double_token_ids[0].unsqueeze(0),
+                                token_ids_mask=double_token_ids_mask[0].unsqueeze(0),
+                                char_ids=double_char_ids[0].unsqueeze(0),
+                                char_ids_mask=double_char_ids_mask[0].unsqueeze(0),
                                 duration=ref_audio_len * 2,
                                 steps=nfe_step,
                                 cfg_strength=cfg_strength,
