@@ -419,6 +419,9 @@ class Trainer:
                             f"{log_samples_path}/step_{global_step}_gen.wav", gen_audio.cpu(), target_sample_rate
                         )
 
+                    # put back in train mode
+                    self.model.train()
+
                 if global_step % self.last_per_steps == 0:
                     self.save_checkpoint(global_step, last=True)
 
