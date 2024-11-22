@@ -15,7 +15,7 @@ import os
 import tempfile
 
 class TTSProcessor:
-    def __init__(self, ckpt_file, vocab_file, device=None, dtype=torch.float32):
+    def __init__(self, ckpt_file, vocab_file, vocoder_name="vocos", device=None, dtype=torch.float32):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = dtype
 
@@ -24,7 +24,7 @@ class TTSProcessor:
             model_cls=DiT,
             model_cfg=dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4),
             ckpt_path=ckpt_file,
-            mel_spec_type="vocos",  # or "bigvgan" depending on vocoder
+            mel_spec_type=vocoder_name,  # or "bigvgan" depending on vocoder
             vocab_file=vocab_file,
             ode_method="euler",
             use_ema=True,
@@ -32,7 +32,8 @@ class TTSProcessor:
         ).to(self.device, dtype=self.dtype)
 
         # Load the vocoder
-        self.vocoder = load_vocoder(is_local=False)
+        self.vocoder = load_vocoder(vocoder_name=vocoder_name, is_local=False)
+        self.vocoder_name = vocoder_name
 
         # Set sampling rate
         self.sampling_rate = 24000
@@ -68,6 +69,7 @@ class TTSProcessor:
                     ["Hello world"],  # generation text
                     self.model,
                     self.vocoder,
+                    mel_spec_type=self.vocoder_name,
                     device=self.device,
                 )
             print("Warm-up completed.")
@@ -108,6 +110,7 @@ class TTSProcessor:
                     [text],
                     self.model,
                     self.vocoder,
+                    mel_spec_type=self.vocoder_name,
                     device=self.device,
                 )
                 # Convert numpy array to tensor if necessary
@@ -128,7 +131,7 @@ class TTSProcessor:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Fetch ckpt_file from an environment variable or use a default path
-    ckpt_file = os.getenv("MODEL_FILEPATH", str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors")))
+    ckpt_file = os.getenv("MODEL_FILEPATH", "/home/johanna.reiml/model_34000.pt")
 
     # Initialize the TTSProcessor with the provided or default checkpoint file
     app.state.processor = TTSProcessor(
