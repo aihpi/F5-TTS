@@ -398,11 +398,15 @@ class Trainer:
                     self.save_checkpoint(global_step)
 
                     if self.log_samples and self.accelerator.is_local_main_process:
-                        ref_audio, ref_audio_len = vocoder.decode(batch["mel"][0].unsqueeze(0)), mel_lengths[0]
+                        if self.vocoder_name == "vocos":
+                            ref_audio, ref_audio_len = vocoder.decode(batch["mel"][0].unsqueeze(0)), mel_lengths[0]
+                        elif self.vocoder_name == "bigvgan":
+                            ref_audio, ref_audio_len = vocoder(batch["mel"][0].unsqueeze(0)), mel_lengths[0]
+                            ref_audio = ref_audio.squeeze(0)
                         torchaudio.save(
                             f"{log_samples_path}/step_{global_step}_ref.wav", ref_audio.cpu(), target_sample_rate
                         )
-                        with torch.inference_mode():
+                        with torch.no_grad():
                             generated, _ = self.accelerator.unwrap_model(self.model).sample(
                                 cond=mel_spec[0][:ref_audio_len].unsqueeze(0),
                                 text=[text_inputs[0] + [" "] + text_inputs[0]],
@@ -412,9 +416,13 @@ class Trainer:
                                 sway_sampling_coef=sway_sampling_coef,
                             )
                         generated = generated.to(torch.float32)
-                        gen_audio = vocoder.decode(
-                            generated[:, ref_audio_len:, :].permute(0, 2, 1).to(self.accelerator.device)
-                        )
+
+                        gen_spectogram = generated[:, ref_audio_len:, :].permute(0, 2, 1).to(self.accelerator.device)
+                        if self.vocoder_name == "vocos":
+                            gen_audio = vocoder.decode(gen_spectogram)
+                        elif self.vocoder_name == "bigvgan":
+                            gen_audio = vocoder(gen_spectogram).squeeze(0)
+
                         torchaudio.save(
                             f"{log_samples_path}/step_{global_step}_gen.wav", gen_audio.cpu(), target_sample_rate
                         )
