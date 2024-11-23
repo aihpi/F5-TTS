@@ -3,6 +3,10 @@
 import os
 import sys
 
+from modelscope import AutoModelForCausalLM
+
+from f5_tts.model.dataset import process_text_batch
+
 os.environ["PYTOCH_ENABLE_MPS_FALLBACK"] = "1"  # for MPS device compatibility
 sys.path.append(f"../../{os.path.dirname(os.path.abspath(__file__))}/third_party/BigVGAN/")
 
@@ -22,7 +26,7 @@ import torchaudio
 import tqdm
 from huggingface_hub import snapshot_download, hf_hub_download
 from pydub import AudioSegment, silence
-from transformers import pipeline
+from transformers import pipeline, AutoConfig
 from vocos import Vocos
 
 from f5_tts.model import CFM
@@ -230,9 +234,23 @@ def load_model(
     print("token : ", tokenizer)
     print("model : ", ckpt_path, "\n")
 
+    token_embedding_model_name = "meta-llama/Llama-3.2-3B"
+    token_embedding_model = AutoConfig.from_pretrained(token_embedding_model_name, trust_remote_code=True)
+
+    pad_token_id = token_embedding_model.pad_token_id
+    token_num_embeds =  token_embedding_model.vocab_size
+    token_dim = token_embedding_model.hidden_size
+
     vocab_char_map, vocab_size = get_tokenizer(vocab_file, tokenizer)
     model = CFM(
-        transformer=model_cls(**model_cfg, text_num_embeds=vocab_size, mel_dim=n_mel_channels),
+        transformer=model_cls(
+            **model_cfg,
+            text_num_embeds=vocab_size,
+            mel_dim=n_mel_channels,
+            pad_token_id=pad_token_id,
+            token_num_embeds=token_num_embeds,
+            token_dim=token_dim,
+        ),
         mel_spec_kwargs=dict(
             n_fft=n_fft,
             hop_length=hop_length,
@@ -400,6 +418,7 @@ def infer_batch_process(
     gen_text_batches,
     model_obj,
     vocoder,
+    tokenizer,
     mel_spec_type="vocos",
     progress=tqdm,
     target_rms=0.1,
@@ -432,7 +451,10 @@ def infer_batch_process(
     for i, gen_text in enumerate(progress.tqdm(gen_text_batches)):
         # Prepare the text
         text_list = [ref_text + gen_text]
-        final_text_list = convert_char_to_pinyin(text_list)
+        text_dict = process_text_batch(text_list, tokenizer, vocab_char_map=model_obj.vocab_char_map)
+
+        for k, v in text_dict.items():
+            text_dict[k] = v.cuda()
 
         ref_audio_len = audio.shape[-1] // hop_length
         if fix_duration is not None:
@@ -447,7 +469,7 @@ def infer_batch_process(
         with torch.inference_mode():
             generated, _ = model_obj.sample(
                 cond=audio,
-                text=final_text_list,
+                **text_dict,
                 duration=duration,
                 steps=nfe_step,
                 cfg_strength=cfg_strength,

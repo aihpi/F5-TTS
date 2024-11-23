@@ -2,16 +2,16 @@ import requests
 
 def main():
     # Server URL
-    url = 'http://gx12.matthias.herzog.vpn.hpi-sci.de:8005/generate'
+    url = 'http://localhost:8000/generate'
 
     # Paths to your files
-    ref_audio_path = '/path/to/ref_voice.wav'  # Replace with your reference audio file path
-    generated_audio_path = 'generated_audio.wav'   # The output file
+    ref_audio_path = 'ref.mp3'  # Replace with your reference audio file path
+    generated_audio_path = 'out/generated_audio_de_fusion.wav'  # The output file
 
     # Data to send
     data = {
         'ref_text': '',  # Optional reference text
-        'text': 'This is the text to generate speech from.',  # The text to synthesize
+        'text': 'Das ist ein Beispiel für das was möglich ist mit KI.',  # The text to synthesize
     }
 
     # Files to send

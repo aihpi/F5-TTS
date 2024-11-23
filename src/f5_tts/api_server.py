@@ -3,6 +3,8 @@ from typing import AsyncGenerator
 
 import torch
 import torchaudio
+from transformers import AutoTokenizer
+
 from f5_tts.infer.utils_infer import infer_batch_process, preprocess_ref_audio_text, load_vocoder, load_model
 from f5_tts.model.backbones.dit import DiT
 
@@ -15,7 +17,7 @@ import os
 import tempfile
 
 class TTSProcessor:
-    def __init__(self, ckpt_file, vocab_file, vocoder_name="vocos", device=None, dtype=torch.float32):
+    def __init__(self, ckpt_file, vocab_file, vocoder_name="bigvgan", device=None, dtype=torch.float32):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = dtype
 
@@ -30,6 +32,9 @@ class TTSProcessor:
             use_ema=True,
             device=self.device,
         ).to(self.device, dtype=self.dtype)
+        token_embedding_model_name = "meta-llama/Llama-3.2-3B"
+        self.tokenizer = AutoTokenizer.from_pretrained(token_embedding_model_name)
+        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
         # Load the vocoder
         self.vocoder = load_vocoder(vocoder_name=vocoder_name, is_local=False)
@@ -69,6 +74,7 @@ class TTSProcessor:
                     ["Hello world"],  # generation text
                     self.model,
                     self.vocoder,
+                    tokenizer=self.tokenizer,
                     mel_spec_type=self.vocoder_name,
                     device=self.device,
                 )
@@ -110,6 +116,7 @@ class TTSProcessor:
                     [text],
                     self.model,
                     self.vocoder,
+                    tokenizer=self.tokenizer,
                     mel_spec_type=self.vocoder_name,
                     device=self.device,
                 )
@@ -131,7 +138,7 @@ class TTSProcessor:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Fetch ckpt_file from an environment variable or use a default path
-    ckpt_file = os.getenv("MODEL_FILEPATH", "/home/johanna.reiml/model_34000.pt")
+    ckpt_file = os.getenv("MODEL_FILEPATH", "/mnt/raid/johanna.reiml/ckpts/F5TTS_DE_bigvgan-Fusion_Llama-3B/model_49000.pt")
 
     # Initialize the TTSProcessor with the provided or default checkpoint file
     app.state.processor = TTSProcessor(

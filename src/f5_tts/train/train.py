@@ -91,7 +91,7 @@ def main():
         learning_rate,
         num_warmup_updates=num_warmup_updates,
         save_per_updates=save_per_updates,
-        checkpoint_path=str(files("f5_tts").joinpath(f"../../ckpts/{exp_name}")),
+        checkpoint_path=f"/mnt/raid/johanna.reiml/ckpts/{exp_name}",
         vocab_char_map=vocab_char_map,
         token_embedding_model_name=token_embedding_model_name,
         batch_size=batch_size_per_gpu,
