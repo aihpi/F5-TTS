@@ -12,7 +12,7 @@ n_mel_channels = 100
 hop_length = 256
 win_length = 1024
 n_fft = 1024
-mel_spec_type = "vocos"  # 'vocos' or 'bigvgan'
+mel_spec_type = "bigvgan"  # 'vocos' or 'bigvgan'
 
 tokenizer = "pinyin"  # 'pinyin', 'char', or 'custom'
 tokenizer_path = None  # if tokenizer = 'custom', define the path to the tokenizer you want to use (should be vocab.txt)
@@ -20,7 +20,7 @@ dataset_name = "CV_de_Emilia_DE"
 
 # -------------------------- Training Settings -------------------------- #
 
-exp_name = "F5TTS_Split"  # F5TTS_Base | E2TTS_Base
+exp_name = "F5TTS_DE_bigvgan-long"  # F5TTS_Base | E2TTS_Base
 
 learning_rate = 1e-5
 
@@ -30,10 +30,10 @@ max_samples = 64  # max sequences per batch if use frame-wise batch_size. we set
 grad_accumulation_steps = 1  # note: updates = steps / grad_accumulation_steps
 max_grad_norm = 1.0
 
-epochs = 11  # use linear decay, thus epochs control the slope
+epochs = 200  # use linear decay, thus epochs control the slope
 num_warmup_updates = 5000  # warmup steps
-save_per_updates = 1000  # save checkpoint per steps
-last_per_steps = 1000  # save last checkpoint per steps
+save_per_updates = 5000  # save checkpoint per steps
+last_per_steps = 5000  # save last checkpoint per steps
 
 
 wandb_resume_id = None
@@ -72,7 +72,7 @@ def main():
         learning_rate,
         num_warmup_updates=num_warmup_updates,
         save_per_updates=save_per_updates,
-        checkpoint_path=str(files("f5_tts").joinpath(f"../../ckpts/{exp_name}")),
+        checkpoint_path=f"/raid/shared/models/F5TTS/ckpts/{exp_name}",
         batch_size=batch_size_per_gpu,
         batch_size_type=batch_size_type,
         max_samples=max_samples,
@@ -83,7 +83,7 @@ def main():
         wandb_run_name=exp_name,
         wandb_resume_id=wandb_resume_id,
         last_per_steps=last_per_steps,
-        log_samples=True,
+        log_samples=False,
         mel_spec_type=mel_spec_type,
     )
 
