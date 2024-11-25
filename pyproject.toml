@@ -49,6 +49,8 @@ eval = [
     "modelscope",
     "zhconv",
     "zhon",
+    "loguru",
+    "DeepFilterNet",
 ]
 
 [project.urls]

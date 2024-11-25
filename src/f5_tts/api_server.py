@@ -15,6 +15,10 @@ from pydantic import BaseModel
 from f5_tts.infer.utils_infer import infer_batch_process, preprocess_ref_audio_text, load_vocoder, load_model
 from f5_tts.model.backbones.dit import DiT
 
+from df import enhance, init_df
+import torchaudio
+from torchaudio.transforms import Resample
+
 PREDEFINED_SCENARIOS = {
     'scenario1': [
         "Hey! Ich bin auf der ey eye at eytsch pih eye Konferenz und stehe hier vor einem Exponat, das meine Stimme imitieren kann. Ich merke gerade, dass sich das erschreckend echt anhört. Dabei habe ich diesen Text hier nie gesagt.",
@@ -194,6 +198,84 @@ async def generate(
     torchaudio.save(audio_bytes, audio_waveform, sample_rate, format='wav')
     audio_bytes.seek(0)
     return StreamingResponse(audio_bytes, media_type="audio/wav")
+
+
+@app.post("/clean")
+async def clean(
+    noisy_audio: UploadFile = File(...),
+    model_base_dir: str = Form("DeepFilterNet2"),
+    enable_post_filter: bool = Form(True),
+    compensate_delay: bool = Form(True),
+    atten_lim_db: float = Form(10000),
+    log_level: str = Form("info"),
+    epoch: str = Form("best")
+) -> StreamingResponse:
+    """
+    Endpoint for advanced noise suppression in uploaded audio files.
+
+    Args:
+        noisy_audio (UploadFile): Noisy input audio file.
+        model_base_dir (str): Path to the DeepFilterNet model.
+        enable_post_filter (bool): Enable post-filter for additional noise attenuation.
+        compensate_delay (bool): Compensate for STFT/ISTFT delay.
+        atten_lim_db (float): Optional limit on noise attenuation in dB.
+        log_level (str): Logger verbosity. Options: "debug", "info", "error", "none".
+        epoch (str): Checkpoint epoch to load. Defaults to "best".
+
+    Returns:
+        StreamingResponse: Clean audio file as a WAV stream.
+    """
+    try:
+        # Read the audio file
+        noisy_audio_bytes = await noisy_audio.read()
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio_file:
+            temp_audio_file.write(noisy_audio_bytes)
+            temp_audio_file.flush()
+            temp_audio_path = temp_audio_file.name
+        
+        # Load the noisy audio
+        waveform, sample_rate = torchaudio.load(temp_audio_path)
+
+        # Resample if the audio is not 48kHz
+        if sample_rate != 48000:
+            print("Resampling audio to 48kHz...")
+            resample = Resample(orig_freq=sample_rate, new_freq=48000)
+            waveform = resample(waveform)
+            sample_rate = 48000
+
+        # Initialize the DeepFilterNet model with advanced options
+        print("Initializing DeepFilterNet...")
+        model, df_state, loaded_epoch = init_df(
+            model_base_dir=model_base_dir,
+            post_filter=enable_post_filter,
+            log_level=log_level,
+            epoch=epoch
+        )
+
+        print(f"Loaded model from epoch: {loaded_epoch}")
+
+        # Apply noise suppression
+        print("Applying advanced noise suppression...")
+        clean_audio = enhance(
+            model, df_state, waveform,
+            pad=compensate_delay,
+            atten_lim_db=atten_lim_db
+        )
+
+        # Save the clean audio to bytes
+        clean_audio_bytes = io.BytesIO()
+        torchaudio.save(clean_audio_bytes, clean_audio, sample_rate, format='wav')
+        clean_audio_bytes.seek(0)
+        
+        return StreamingResponse(
+            clean_audio_bytes,
+            media_type="audio/wav",
+            headers={"Content-Disposition": f"attachment; filename=clean_audio.wav"}
+        )
+    finally:
+        # Clean up temporary files
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
 
 
 @app.post("/generate_batch")
