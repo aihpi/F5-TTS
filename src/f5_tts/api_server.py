@@ -298,10 +298,14 @@ async def generate_batch(
 @app.post("/generate_predefined")
 async def generate_predefined(
         ref_audio: UploadFile = File(...),
-        ref_text: str = Form("")
+        ref_text: str = Form(""),
+        scenario: str = Form(""),
 ) -> StreamingResponse:
+    scenarios = PREDEFINED_SCENARIOS
+    if scenario is not None and len(scenarios) > 0:
+        scenarios = {scenario: PREDEFINED_SCENARIOS[scenario]}
     zip_buffer = await process_batch_generation(
-        app.state.processor, await ref_audio.read(), ref_text, PREDEFINED_SCENARIOS
+        app.state.processor, await ref_audio.read(), ref_text, scenarios
     )
     return StreamingResponse(
         zip_buffer,
