@@ -1,0 +1,26 @@
+FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN set -x \
+    && apt-get update \
+    && apt-get install -y git ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+WORKDIR /app
+
+ARG GIT_REPOSITORY="https://github.com/aihpi/F5-TTS"
+# Hacky workaround, as bigvgan is not properly setup to be installed as a package:
+# https://github.com/aihpi/F5-TTS?tab=readme-ov-file#2-local-editable-if-also-do-training-finetuning
+ARG BIGVGAN_PATCH="import os\nimport sys\nsys.path.append(os.path.dirname(os.path.abspath(__file__)))\n"
+
+# latest commit on 27th November 2024
+RUN git clone --depth 1 --branch d8e622f $GIT_REPOSITORY \
+    && cd F5-TTS \
+    && git submodule update --init --recursive \
+    && printf "$BIGVGAN_PATCH" | cat - src/third_party/BigVGAN/bigvgan.py > temp && mv temp src/third_party/BigVGAN/bigvgan.py \
+    && pip install -e .[eval] \
+    && pip install -r src/third_party/BigVGAN/requirements.txt
+
+CMD ["python3", "-m", "uvicorn", "f5_tts.api_server:app", "--host", "0.0.0.0", "--port", "8000"]
