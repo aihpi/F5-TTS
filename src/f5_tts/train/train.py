@@ -12,7 +12,7 @@ n_mel_channels = 100
 hop_length = 256
 win_length = 1024
 n_fft = 1024
-mel_spec_type = "bigvgan"  # 'vocos' or 'bigvgan'
+mel_spec_type = "vocos"  # 'vocos' or 'bigvgan'
 
 tokenizer = "pinyin"  # 'pinyin', 'char', or 'custom'
 tokenizer_path = None  # if tokenizer = 'custom', define the path to the tokenizer you want to use (should be vocab.txt)
@@ -20,7 +20,7 @@ dataset_name = "CV_de_Emilia_DE"
 
 # -------------------------- Training Settings -------------------------- #
 
-exp_name = "F5TTS_DE_bigvgan-long"  # F5TTS_Base | E2TTS_Base
+exp_name = "F5TTS_DE_vocos-long"  # F5TTS_Base | E2TTS_Base
 
 learning_rate = 1e-5
 
