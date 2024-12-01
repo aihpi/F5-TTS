@@ -1,5 +1,6 @@
 # A unified script for inference process
 # Make adjustments inside functions, and consider both gradio and cli scripts if need to change func output format
+import math
 import os
 import sys
 
@@ -253,25 +254,30 @@ def load_model(
     return model
 
 
-def remove_silence_edges(audio, silence_threshold=-42):
+def remove_silence_edges(audio, silence_threshold=-42, fadeout_duration=0):
     # Remove silence from the start
     non_silent_start_idx = silence.detect_leading_silence(audio, silence_threshold=silence_threshold)
     audio = audio[non_silent_start_idx:]
 
-    # Remove silence from the end
-    non_silent_end_duration = audio.duration_seconds
+    # Find the last point before complete silence
+    final_silent_start = int(audio.duration_seconds * 1000)  # Convert to ms
     for ms in reversed(audio):
         if ms.dBFS > silence_threshold:
             break
-        non_silent_end_duration -= 0.001
-    trimmed_audio = audio[: int(non_silent_end_duration * 1000)]
+        final_silent_start -= 1
 
-    return trimmed_audio
+    # Add fadeout
+    main_content = audio[:final_silent_start]
+    if fadeout_duration <= 0:
+        return main_content
+
+    fade_segment = audio[final_silent_start:final_silent_start + fadeout_duration]
+    fade_segment = fade_segment.fade_out(duration=fadeout_duration)
+
+    return main_content + fade_segment
 
 
 # preprocess reference audio and text
-
-
 def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_info=print, device=device):
     show_info("Converting audio...")
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
@@ -410,10 +416,9 @@ def infer_batch_process(
     speed=1,
     fix_duration=None,
     device=None,
-    dtype=torch.float32,
 ):
     audio, sr = ref_audio
-    audio = audio.to(device=device, dtype=torch.float32)
+    audio = audio.to(device)
     if audio.shape[0] > 1:
         audio = torch.mean(audio, dim=0, keepdim=True)
 
@@ -422,10 +427,9 @@ def infer_batch_process(
         audio = audio * target_rms / rms
     if sr != target_sample_rate:
         resampler = torchaudio.transforms.Resample(sr, target_sample_rate)
-        resampler = resampler.to(device)
+        resampler.to(device)
         audio = resampler(audio)
 
-    audio = audio.to(dtype)
     generated_waves = []
     spectrograms = []
 
