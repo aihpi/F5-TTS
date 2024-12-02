@@ -69,7 +69,7 @@ async def get_vocoder(vocoder_name: str) -> torch.nn.Module:
 @app.post("/preprocess/noise")
 async def preprocess_noise(ref_audio: UploadFile = File(...)) -> StreamingResponse:
     ref_audio_bytes = await ref_audio.read()
-    denoised_audio_bytes = app.state.denoise_model.denoise(ref_audio_bytes)
+    denoised_audio_bytes = await app.state.denoise_model.denoise(ref_audio_bytes)
     return StreamingResponse(denoised_audio_bytes, media_type="audio/wav")
 
 

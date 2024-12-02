@@ -1,3 +1,4 @@
+import asyncio
 import io
 
 import torch
@@ -84,9 +85,10 @@ class TTSModel:
 class DeepFilterNetModel:
     def __init__(self):
         self.model, self.df_state, _ = init_df()
+        self.lock = asyncio.Lock()  # Create async lock for thread safety
 
     @torch.no_grad()
-    def denoise(self, audio_bytes):
+    async def denoise(self, audio_bytes):
         target_sample_rate = 48000
 
         # Load and resample if the audio is not 48kHz
@@ -96,8 +98,9 @@ class DeepFilterNetModel:
             resample = Resample(orig_freq=sr, new_freq=target_sample_rate)
             audio = resample(audio)
 
-        # Clean the audio
-        denoised_audio = enhance(self.model, self.df_state, audio)
+        # Clean the audio with thread safety
+        async with self.lock:  # Acquire lock before modifying df_state
+            denoised_audio = enhance(self.model, self.df_state, audio)
 
         # Save the clean audio to bytes
         denoised_audio_bytes = io.BytesIO()
