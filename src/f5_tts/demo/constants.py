@@ -2,6 +2,8 @@
 MODEL_CHECKPOINTS = {
     # German vocos checkpoints
     "kisz-german-vocos-295000": "hf://aihpi/F5-TTS-German/F5TTS_Base/model_295000.safetensors",
+    "kisz-german-vocos-365000": "hf://aihpi/F5-TTS-German/F5TTS_Base/model_365000.safetensors",
+    "kisz-german-vocos-420000": "hf://aihpi/F5-TTS-German/F5TTS_Base/model_420000.safetensors",
     # German bigvgan checkpoints
     "kisz-german-bigvgan-295000": "hf://aihpi/F5-TTS-German/F5TTS_Base_bigvgan/model_295000.safetensors",
     "kisz-german-bigvgan-430000": "hf://aihpi/F5-TTS-German/F5TTS_Base_bigvgan/model_430000.safetensors",
@@ -15,6 +17,14 @@ MODEL_CHECKPOINTS = {
 MODEL_METADATA = {
     # German vocos checkpoints
     "kisz-german-vocos-295000": {
+        "vocoder_name": "vocos",
+        "language": "de"
+    },
+    "kisz-german-vocos-365000": {
+        "vocoder_name": "vocos",
+        "language": "de"
+    },
+    "kisz-german-vocos-420000": {
         "vocoder_name": "vocos",
         "language": "de"
     },
