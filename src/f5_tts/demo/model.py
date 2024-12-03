@@ -7,6 +7,8 @@ from df import init_df, enhance
 
 from f5_tts.infer.utils_infer import infer_batch_process, load_vocoder, load_model
 from f5_tts.model.backbones.dit import DiT
+from pydub import AudioSegment
+from pydub.effects import high_pass_filter, low_pass_filter
 from torchaudio.transforms import Resample
 
 
@@ -41,6 +43,24 @@ class TTSModel:
             self.vocoder = vocoder
             self.vocoder_name = vocoder_name
 
+    def apply_phone_effect(self, audio_bytes, sample_rate_phone, low_pass, high_pass, volume_boost):
+        audio = AudioSegment.from_wav(io.BytesIO(audio_bytes))
+
+        # Apply telephone-like effects
+        audio = audio.set_frame_rate(sample_rate_phone)
+        audio = audio.set_channels(1)
+        audio = high_pass_filter(audio, high_pass)
+        audio = low_pass_filter(audio, low_pass)
+        audio = audio.set_sample_width(2)
+        audio = audio + volume_boost
+        audio = audio.normalize()
+
+        # Convert back to bytes
+        output_bytes = io.BytesIO()
+        audio.export(output_bytes, format='wav')
+        output_bytes.seek(0)
+        return output_bytes
+
     @torch.no_grad()
     def sample(
             self,
@@ -53,6 +73,11 @@ class TTSModel:
             cfg_strength=2.0,
             sway_sampling_coef=-1,
             speed=1.0,
+            apply_phone=False,
+            phone_sample_rate=8000,
+            phone_low_pass=3400,
+            phone_high_pass=300,
+            phone_volume_boost=3,
     ):
         ref_audio = torchaudio.load(io.BytesIO(ref_audio_bytes))
 
@@ -76,9 +101,21 @@ class TTSModel:
         if gen_audio.dim() == 1:
             gen_audio = gen_audio.unsqueeze(0)
 
+        # Convert to wav bytes
         gen_audio_bytes = io.BytesIO()
         torchaudio.save(gen_audio_bytes, gen_audio, final_sr, format='wav')
         gen_audio_bytes.seek(0)
+
+        # Apply phone effect if requested
+        if apply_phone:
+            gen_audio_bytes = self.apply_phone_effect(
+                gen_audio_bytes.read(),
+                phone_sample_rate,
+                phone_low_pass,
+                phone_high_pass,
+                phone_volume_boost
+            )
+
         return gen_audio_bytes
 
 

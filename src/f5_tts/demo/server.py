@@ -114,6 +114,12 @@ async def generate(
         cfg_strength: float = Form(2.0),
         sway_sampling_coef: int = Form(-1),
         speed: float = Form(1.0),
+        # Phone effect parameters
+        apply_phone: bool = Form(False),
+        phone_sample_rate: int = Form(8000),
+        phone_low_pass: int = Form(3400),
+        phone_high_pass: int = Form(300),
+        phone_volume_boost: int = Form(3),
 ) -> StreamingResponse:
     if model_id not in MODEL_METADATA:
         raise HTTPException(
@@ -133,6 +139,11 @@ async def generate(
         cfg_strength=cfg_strength,
         sway_sampling_coef=sway_sampling_coef,
         speed=speed,
+        apply_phone=apply_phone,
+        phone_sample_rate=phone_sample_rate,
+        phone_low_pass=phone_low_pass,
+        phone_high_pass=phone_high_pass,
+        phone_volume_boost=phone_volume_boost,
     )
     return StreamingResponse(gen_audio_bytes, media_type="audio/wav")
 
